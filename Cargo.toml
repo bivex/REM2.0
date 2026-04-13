@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rem-domain",
+    "crates/rem-application",
+    "crates/rem-infrastructure",
+    "crates/rem-cli",
+]
+
+[workspace.package]
+version     = "0.1.0"
+edition     = "2021"
+authors     = ["REM3 Contributors"]
+license     = "MIT"
+repository  = "https://github.com/example/rem3"
+
+# ── Shared dependency versions ──────────────────────────────────────────────
+[workspace.dependencies]
+# Async runtime
+tokio           = { version = "1",  features = ["full"] }
+
+# Error handling
+thiserror       = "2"
+anyhow          = "1"
+
+# Serialisation
+serde           = { version = "1", features = ["derive"] }
+serde_json      = "1"
+
+# CLI
+clap            = { version = "4", features = ["derive", "env"] }
+
+# Logging / tracing
+tracing         = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# rust-analyzer public API crates
+ra_ap_syntax        = "0.0.328"
+ra_ap_ide           = "0.0.328"
+ra_ap_ide_db        = "0.0.328"
+ra_ap_project_model = "0.0.328"
+ra_ap_vfs           = "0.0.328"
+ra_ap_load_cargo    = { package = "ra_ap_load-cargo", version = "0.0.328" }
+
+# Internal crates
+rem-domain      = { path = "crates/rem-domain" }
+rem-application = { path = "crates/rem-application" }
+rem-infrastructure = { path = "crates/rem-infrastructure" }

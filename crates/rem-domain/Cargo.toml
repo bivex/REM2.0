@@ -1,0 +1,12 @@
+[package]
+name        = "rem-domain"
+description = "Pure domain model: entities, value objects, ports, domain services"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+repository.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+serde     = { workspace = true }
