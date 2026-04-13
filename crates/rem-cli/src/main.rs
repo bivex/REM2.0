@@ -18,10 +18,12 @@ fn main() -> Result<()> {
     if cli.json_logs {
         tracing_subscriber::fmt()
             .json()
+            .with_writer(std::io::stderr)
             .with_env_filter(filter)
             .init();
     } else {
         tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
             .with_env_filter(filter)
             .init();
     }

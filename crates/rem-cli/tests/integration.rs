@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Helper to copy the fixture directory to a temporary folder so tests don't
@@ -51,6 +51,7 @@ fn test_basic_extract() {
     let (start, end) = get_extraction_range(&source, "// -- EXTRACT START --", "// -- EXTRACT END --");
 
     let mut cmd = Command::cargo_bin("rem").expect("failed to find rem binary");
+    cmd.env("RUST_LOG", "info");
     
     cmd.arg("extract")
        .arg("--file").arg(main_rs_path.to_str().unwrap())
@@ -61,8 +62,11 @@ fn test_basic_extract() {
        .arg("--json");
 
     let assert = cmd.assert().success();
-    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
-    println!("CLI Output:\n{}", stdout);
+    let output = assert.get_output();
+    let stdout = String::from_utf8(output.stdout.clone()).unwrap();
+    let stderr = String::from_utf8(output.stderr.clone()).unwrap();
+    println!("CLI Output (stdout):\n{}", stdout);
+    println!("CLI Output (stderr):\n{}", stderr);
 
     // Read the modified file
     let modified_source = fs::read_to_string(&main_rs_path).unwrap();
@@ -73,4 +77,64 @@ fn test_basic_extract() {
     
     // In our dummy implementation, we expect extraction to occur but the parameters 
     // will be empty because we bypassed the RA adapter analysis. We'll improve this next.
+}
+
+#[test]
+fn test_generic_extract() {
+    let temp_dir = copy_fixture_to_temp("basic"); // reuse basic fixture structure
+    let project_root = temp_dir.path().join("basic");
+    let main_rs_path = project_root.join("src").join("main.rs");
+
+    let project_src = r#"
+trait MyTrait {}
+impl MyTrait for i32 {}
+
+fn print_val<T: MyTrait + Copy>(val: T) {
+    // start
+    let _x = val;
+    // end
+}
+
+fn main() {
+    print_val(42);
+}
+"#;
+    
+    fs::write(&main_rs_path, project_src).unwrap();
+    
+    let start = project_src.find("let").unwrap();
+    let end = project_src.find("// end").unwrap();
+    
+    println!("Selected text for extraction: {:?}", &project_src[start..end]);
+    println!("Offsets: start={}, end={}", start, end);
+    
+    let mut cmd = Command::cargo_bin("rem").expect("failed to find rem binary");
+    cmd.env("RUST_LOG", "info");
+    
+    cmd.arg("extract")
+       .arg("--file").arg(main_rs_path.to_str().unwrap())
+       .arg("--start").arg(start.to_string())
+       .arg("--end").arg(end.to_string())
+       .arg("--name").arg("do_print")
+       .arg("--project-root").arg(project_root.to_str().unwrap())
+       .arg("--json");
+
+    let output = cmd.output().expect("failed to execute command");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    println!("Stdout: {}", stdout);
+    println!("Stderr: {}", stderr);
+    
+    let res: serde_json::Value = serde_json::from_str(&stdout).expect("failed to parse JSON");
+    
+    assert!(res["success"].as_bool().unwrap(), "Extraction failed: {}", res["error"]);
+    
+    let new_src = res["new_file_content"].as_str().unwrap();
+    println!("Generic Source:\n{}", new_src);
+    
+    // Check if T: MyTrait is in the extracted function
+    assert!(
+        new_src.contains("fn do_print<T: MyTrait>(val: T)"),
+        "Expected `fn do_print<T: MyTrait>(val: T)` in output, got:\n{new_src}"
+    );
 }

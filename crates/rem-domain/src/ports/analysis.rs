@@ -21,7 +21,13 @@ pub struct SelectionAnalysis {
     pub is_const: bool,
     /// Generic parameters from the enclosing function that are referenced
     /// inside the selection (must be forwarded to the extracted fn).
-    pub referenced_generics: Vec<String>,
+    pub referenced_generics: Vec<GenericParam>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GenericParam {
+    pub name: String,
+    pub full_definition: String, // e.g. "T: Display + Debug"
 }
 
 #[derive(Debug, Clone)]

@@ -41,13 +41,14 @@ impl CodeGenerator {
     ) -> GeneratedExtraction {
         // Apply deref rewriting to the body for variables passed by reference
         let rewritten_body = rewrite_body_with_derefs(body, free_vars);
-        
+
         let params = build_param_list(free_vars);
         let args   = build_arg_list(free_vars);
         let ret    = build_return_type(analysis);
         let asynck = if analysis.is_async { "async " } else { "" };
         let constk = if analysis.is_const { "const " } else { "" };
-        let generics  = build_generic_params(analysis, free_vars);
+        let generics       = build_generic_params(analysis, free_vars);
+        let call_generics  = build_call_site_generics(analysis);
 
         let ret_clause = if ret.is_empty() {
             String::new()
@@ -60,7 +61,7 @@ impl CodeGenerator {
         );
 
         let await_suffix = if analysis.is_async { ".await" } else { "" };
-        let call_expr = format!("{fn_name}{generics}({args}){await_suffix}");
+        let call_expr = format!("{fn_name}{call_generics}({args}){await_suffix}");
 
         let call_site_replacement = match cf_reification {
             None => {
@@ -95,7 +96,7 @@ impl CodeGenerator {
 // ── internal body rewriter ──────────────────────────────────────────────────
 
 fn rewrite_body_with_derefs(body: &str, vars: &[FreeVariable]) -> String {
-    use ra_ap_syntax::{ast, AstNode, SyntaxElement};
+    use ra_ap_syntax::{ast, AstNode};
     
     let refs_to_deref: std::collections::HashSet<String> = vars.iter()
         .filter(|v| matches!(v.ownership, OwnershipKind::SharedRef | OwnershipKind::MutRef))
@@ -201,7 +202,10 @@ fn build_output_lhs(outputs: &[OutputVariable]) -> String {
 }
 
 fn build_generic_params(analysis: &SelectionAnalysis, vars: &[FreeVariable]) -> String {
-    let params: Vec<String> = analysis.referenced_generics.clone();
+    let params_strs: Vec<String> = analysis.referenced_generics.iter()
+        .map(|g| g.full_definition.clone())
+        .collect();
+
     // Add lifetime parameters that appear in the free variable types.
     let lifetimes: Vec<String> = vars
         .iter()
@@ -209,12 +213,28 @@ fn build_generic_params(analysis: &SelectionAnalysis, vars: &[FreeVariable]) -> 
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
+
     let mut all = lifetimes;
-    all.extend(params);
+    all.extend(params_strs);
+
     if all.is_empty() {
         String::new()
     } else {
         format!("<{}>", all.join(", "))
+    }
+}
+
+/// Build generic parameter list for the call site (names only, no bounds).
+/// e.g. `::<T>` instead of `::<T: Display>`, since bounds aren't allowed at call sites.
+fn build_call_site_generics(analysis: &SelectionAnalysis) -> String {
+    let names: Vec<&str> = analysis.referenced_generics.iter()
+        .map(|g| g.name.as_str())
+        .collect();
+
+    if names.is_empty() {
+        String::new()
+    } else {
+        format!("::{}", format!("<{}>", names.join(", ")))
     }
 }
 
