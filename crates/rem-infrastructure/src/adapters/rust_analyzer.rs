@@ -147,17 +147,10 @@ impl CodeAnalysisPort for RustAnalyzerAdapter {
                                         if !defined_inside {
                                             // Free variable: defined outside, used inside
                                             if seen_free.insert(name.clone()) {
-                                                // Determine ownership from binding mode:
-                                                // - mut bindings → MutRef
-                                                // - ref bindings → SharedRef
-                                                // - by-value bindings → Owned
-                                                let ownership = if local.is_mut(db) {
-                                                    rem_domain::value_objects::OwnershipKind::MutRef
-                                                } else if local.is_ref(db) {
-                                                    rem_domain::value_objects::OwnershipKind::SharedRef
-                                                } else {
-                                                    rem_domain::value_objects::OwnershipKind::Owned
-                                                };
+                                                // Ownership is determined later by refine_ownership.
+                                                // Use a placeholder — it will be overwritten.
+                                                let ownership =
+                                                    rem_domain::value_objects::OwnershipKind::SharedRef;
 
                                                 let ty = local.ty(db);
                                                 let mut ty_str_opt = None;
@@ -323,6 +316,9 @@ impl CodeAnalysisPort for RustAnalyzerAdapter {
                 }
             }
 
+            // ── 3. Refine ownership based on actual usage in the selection ──
+            refine_ownership(syntax, text_range, &mut free_variables);
+
             Ok(SelectionAnalysis {
                 free_variables,
                 output_variables,
@@ -347,4 +343,98 @@ fn resolve_file_id(vfs: &Vfs, file: &FilePath) -> Result<FileId, DomainError> {
                 file.as_str()
             ))
         })
+}
+
+/// Refine ownership of free variables based on how each is actually used
+/// within the selection.
+///
+/// Rules (priority order):
+///  - Any usage is an assignment target (`x = …`, `x += …`) → **MutRef**
+///  - Any usage is behind `&mut` → **MutRef**
+///  - Any usage is behind `&` → shared borrow (not a move)
+///  - Any other usage → potential move → **Owned**
+///  - If no non-borrow usage exists → **SharedRef**
+fn refine_ownership(
+    syntax: &ra_ap_syntax::SyntaxNode,
+    text_range: ra_ap_syntax::TextRange,
+    free_variables: &mut [rem_domain::ports::analysis::FreeVariable],
+) {
+    for var in free_variables.iter_mut() {
+        let mut has_move_usage = false;
+
+        for descendant in syntax.descendants() {
+            if !text_range.contains_range(descendant.text_range()) {
+                continue;
+            }
+
+            let Some(name_ref) = ast::NameRef::cast(descendant) else { continue };
+            if name_ref.text() != var.name {
+                continue;
+            }
+
+            // Check if behind & or &mut — walk up through Path → RefExpr
+            if let Some(ref_kind) = get_ref_kind(&name_ref) {
+                if ref_kind {
+                    // &mut → mutation
+                    var.ownership = rem_domain::value_objects::OwnershipKind::MutRef;
+                    break;
+                }
+                // & → shared borrow, not a move
+                continue;
+            }
+
+            // Check if it's an assignment target (x = …, x += …)
+            if is_assignment_target(&name_ref) {
+                var.ownership = rem_domain::value_objects::OwnershipKind::MutRef;
+                break;
+            }
+
+            // Everything else is a potential move (ownership transfer)
+            has_move_usage = true;
+        }
+
+        // Only overwrite if we haven't already set MutRef
+        if var.ownership != rem_domain::value_objects::OwnershipKind::MutRef {
+            var.ownership = if has_move_usage {
+                rem_domain::value_objects::OwnershipKind::Owned
+            } else {
+                rem_domain::value_objects::OwnershipKind::SharedRef
+            };
+        }
+    }
+}
+
+/// Returns `Some(true)` for `&mut expr`, `Some(false)` for `& expr`, `None` otherwise.
+fn get_ref_kind(name_ref: &ast::NameRef) -> Option<bool> {
+    for ancestor in name_ref.syntax().ancestors().skip(1).take(3) {
+        if let Some(ref_expr) = ast::RefExpr::cast(ancestor.clone()) {
+            return Some(ref_expr.mut_token().is_some());
+        }
+        // Stop at expression-statement boundary
+        if ast::ExprStmt::cast(ancestor).is_some() {
+            break;
+        }
+    }
+    None
+}
+
+/// Check whether `name_ref` appears as the LHS of an assignment
+/// (`x = …`, `x += …`, `x -= …`, etc.).
+fn is_assignment_target(name_ref: &ast::NameRef) -> bool {
+    for ancestor in name_ref.syntax().ancestors().skip(1).take(5) {
+        if let Some(bin_expr) = ast::BinExpr::cast(ancestor.clone()) {
+            if matches!(bin_expr.op_kind(), Some(ast::BinaryOp::Assignment { .. })) {
+                return bin_expr.lhs().map_or(false, |lhs| {
+                    lhs.syntax()
+                        .text_range()
+                        .contains_range(name_ref.syntax().text_range())
+                });
+            }
+            break;
+        }
+        if ast::ExprStmt::cast(ancestor).is_some() {
+            break;
+        }
+    }
+    false
 }

@@ -16,7 +16,7 @@
 ## Architecture / Code Quality
 
 - [x] **Domain Purity**: Удалена зависимость `ra_ap_syntax` из `rem-domain` — deref-rewriting вынесен в `SyntaxRewritePort`/`SyntaxRewriteAdapter`.
-- [ ] **Ownership Oracle — Move Analysis**: Текущая эвристика (`is_mut`/`is_ref`) не учитывает, что переменная перемещена (moved) в выделенном фрагменте. Нужен анализ использований для корректного определения Owned vs SharedRef.
+- [x] **Ownership Oracle — Move Analysis**: AST-based `refine_ownership` в адаптере определяет Owned/MutRef/SharedRef по реальным использованию. Оракул корректно обрабатывает move + used_after → SharedRef.
 
 ## Infrastructure / DevEx
 

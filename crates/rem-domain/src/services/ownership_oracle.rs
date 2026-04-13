@@ -39,7 +39,10 @@ impl OwnershipOracle {
                             .iter()
                             .any(|out| out.name == v.name);
                         if used_after {
-                            OwnershipKind::MutRef
+                            // The variable is moved inside the selection but still
+                            // needed afterwards — pass by shared reference so the
+                            // caller retains ownership.
+                            OwnershipKind::SharedRef
                         } else {
                             OwnershipKind::Owned
                         }
@@ -67,7 +70,9 @@ mod tests {
     }
 
     #[test]
-    fn mutated_and_used_after_becomes_mut_ref() {
+    fn moved_and_used_after_becomes_shared_ref() {
+        // Variable is moved (Owned) inside selection but still used after →
+        // must be passed by &T so the caller keeps ownership.
         let analysis = SelectionAnalysis {
             free_variables: vec![make_var("x", OwnershipKind::Owned)],
             output_variables: vec![OutputVariable { name: "x".into(), ty: "i32".into() }],
@@ -77,7 +82,7 @@ mod tests {
             referenced_generics: vec![],
         };
         let refined = OwnershipOracle::refine(&analysis);
-        assert_eq!(refined[0].ownership, OwnershipKind::MutRef);
+        assert_eq!(refined[0].ownership, OwnershipKind::SharedRef);
     }
 
     #[test]
