@@ -1,0 +1,18 @@
+[package]
+name = "horror_refactor_fixture"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "level_01_mut_ownership"
+path = "src/level_01_mut_ownership.rs"
+
+[[bin]]
+name = "level_02_control_flow"
+path = "src/level_02_control_flow.rs"
+
+[[bin]]
+name = "level_03_lifetimes"
+path = "src/level_03_lifetimes.rs"
