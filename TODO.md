@@ -13,17 +13,14 @@
 - [ ] **Visibility Control**: Автоматическое определение необходимости `pub` или `pub(crate)` для извлеченной функции.
 - [ ] **Doc Comments**: Перенос или генерация базовых doc-комментариев.
 
+## Architecture / Code Quality
+
+- [x] **Domain Purity**: Удалена зависимость `ra_ap_syntax` из `rem-domain` — deref-rewriting вынесен в `SyntaxRewritePort`/`SyntaxRewriteAdapter`.
+- [ ] **Ownership Oracle — Move Analysis**: Текущая эвристика (`is_mut`/`is_ref`) не учитывает, что переменная перемещена (moved) в выделенном фрагменте. Нужен анализ использований для корректного определения Owned vs SharedRef.
+
 ## Infrastructure / DevEx
 
 - [ ] **Proc-macro support**: Включение и настройка proc-macro server для корректного анализа кода с макросами.
-
-## Очередь решения (Current Stage)
-
-1. **Infrastructure Fix**: Решена проблема "Attached DB" паники через `ra_ap_hir::attach_db`. ✅
-2. **Generic Extraction**: Реализована логика `as_type_param` для идентификации параметров и `trait_bounds` для сбора ограничений. ✅
-3. **Ownership Correctness**: Исправлено определение владения — `Local::is_ref(db)` для различения by-value и by-ref параметров. ✅
-4. **Call-site Generics**: Разделение generic-параметров для сигнатуры (с bounds) и call-site (только имена). ✅
-5. **Final Check**: Валидация через `test_generic_extract`. ✅
 
 ## Integration Tests
 
