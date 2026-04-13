@@ -80,6 +80,7 @@ mod tests {
             is_async: false,
             is_const: false,
             referenced_generics: vec![],
+            enclosing_fn_return_type: None,
         };
         let refined = OwnershipOracle::refine(&analysis);
         assert_eq!(refined[0].ownership, OwnershipKind::SharedRef);
@@ -94,6 +95,7 @@ mod tests {
             is_async: false,
             is_const: false,
             referenced_generics: vec![],
+            enclosing_fn_return_type: None,
         };
         let refined = OwnershipOracle::refine(&analysis);
         assert_eq!(refined[0].ownership, OwnershipKind::SharedRef);

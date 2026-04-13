@@ -74,6 +74,12 @@ struct MessageDetail {
     code: Option<CodeDetail>,
     message: String,
     spans:   Vec<SpanDetail>,
+    children: Vec<ChildDetail>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct ChildDetail {
+    message: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -98,12 +104,19 @@ fn parse_cargo_diagnostics(json_lines: &str) -> Vec<CompilerDiagnostic> {
         .filter(|m| m.reason == "compiler-message")
         .filter_map(|m| m.message)
         .filter(|m| m.code.is_some())
-        .map(|m| CompilerDiagnostic {
-            error_code: m.code.unwrap().code,
-            message: m.message,
-            span_text: m.spans.first()
-                .and_then(|s| s.text.first())
-                .map(|t| t.text.clone()),
+        .map(|m| {
+            let help = m.children.iter()
+                .map(|c| c.message.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            CompilerDiagnostic {
+                error_code: m.code.unwrap().code,
+                message: m.message,
+                span_text: m.spans.first()
+                    .and_then(|s| s.text.first())
+                    .map(|t| t.text.clone()),
+                help_text: if help.is_empty() { None } else { Some(help) },
+            }
         })
         .collect()
 }

@@ -44,17 +44,17 @@ impl LifetimeRepairer {
             match outcome {
                 RepairOutcome::Accepted => return Ok(current),
                 RepairOutcome::Rejected { diagnostics } => {
-                    // Pick the first actionable lifetime error.
+                    // Pick the first actionable error.
                     let first = diagnostics
                         .iter()
-                        .find(|d| d.error_code.starts_with("E0"))
+                        .find(|d| !d.error_code.is_empty())
                         .ok_or_else(|| ExtractionFailure::LifetimeRepairExhausted {
                             iterations: iteration,
                             last_error: "no actionable diagnostic found".into(),
                         })?;
 
                     on_iteration(iteration, &first.error_code);
-                    
+
                     current = apply_smarter_repair(&current, first, iteration);
                 }
             }
@@ -104,6 +104,77 @@ fn apply_smarter_repair(src: &str, diagnostic: &crate::ports::repair::CompilerDi
             
             apply_lifetime_heuristic(src.to_string(), n)
         }
+        "E0621" => {
+            // "explicit lifetime required in the type of `result`"
+            // Help: "consider adding `'a` to the type of `result`: `&'1 mut &'a str`"
+            let msg = &diagnostic.message;
+
+            // Extract the required lifetime (e.g., `'a`) and the parameter name (e.g., `result`)
+            let mut required_lt = None;
+            let mut param_name = None;
+
+            // Look for "lifetime `'xxx>` required" in main message
+            for word in msg.split('`') {
+                if word.starts_with('\'') && word.len() > 1 {
+                    required_lt = Some(word.to_string());
+                    break;
+                }
+            }
+
+            // If not in main message, try the help text
+            // Help format: "consider adding `'a` to the type of `result`"
+            if required_lt.is_none() {
+                if let Some(help) = &diagnostic.help_text {
+                    // Look for "adding `'<lifetime>`" or "consider `'<lifetime>`"
+                    for word in help.split('`') {
+                        if word.starts_with('\'') && word.len() > 1 && word != "'_" {
+                            required_lt = Some(word.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Look for "type of `param_name`" in main message
+            if let Some(idx) = msg.find("type of `") {
+                let rest = &msg[idx + 9..];
+                if let Some(end) = rest.find('`') {
+                    param_name = Some(rest[..end].to_string());
+                }
+            }
+
+            if let (Some(lt), Some(param)) = (required_lt, param_name) {
+                // Find `param: &mut &str` or `param: &` and insert the lifetime
+                // Pattern: "param: &mut &" → "param: &mut &lt "
+                // Pattern: "param: &&" → "param: &&lt "
+                // Pattern: "param: &" → "param: &lt "
+                let search1 = format!("{}: &mut &", param);
+                let search2 = format!("{}: &&", param);
+                let search3 = format!("{}: &", param);
+
+                if let Some(pos) = src.find(&search1) {
+                    let insert_pos = pos + search1.len();
+                    let (before, after) = src.split_at(insert_pos);
+                    return format!("{}{} {}", before, lt, after);
+                }
+                if let Some(pos) = src.find(&search2) {
+                    let insert_pos = pos + search2.len();
+                    let (before, after) = src.split_at(insert_pos);
+                    return format!("{}{} {}", before, lt, after);
+                }
+                // Fallback: find the last fn definition and try to find the param there
+                if let Some(fn_pos) = src.rfind("fn ") {
+                    let fn_src = &src[fn_pos..];
+                    if let Some(p) = fn_src.find(&search3) {
+                        let abs_pos = fn_pos + p + search3.len();
+                        let (before, after) = src.split_at(abs_pos);
+                        return format!("{}{} {}", before, lt, after);
+                    }
+                }
+            }
+
+            apply_lifetime_heuristic(src.to_string(), n)
+        }
         "E0369" | "E0368" => {
             // Binary operation / Assignment on references. 
             // The Deref Rewriter in CodeGenerator usually handles this, 
@@ -128,18 +199,28 @@ fn apply_smarter_repair(src: &str, diagnostic: &crate::ports::repair::CompilerDi
     }
 }
 
-/// Append a fresh lifetime parameter `'remN` to the first `fn <` or `fn name(`
-/// in the source patch.  A real repair loop narrows down the exact span from
-/// the compiler diagnostic; this heuristic is the fallback.
+/// Append a fresh lifetime parameter `'remN` to the **last** `fn` definition
+/// in the source patch (which is the extracted function appended at the end).
+/// A real repair loop narrows down the exact span from the compiler diagnostic;
+/// this heuristic is the fallback.
 fn apply_lifetime_heuristic(src: String, n: u32) -> String {
     let lt = format!("'rem{n}");
-    // Try to inject into an existing generic list `fn foo<`.
-    if let Some(pos) = src.find("fn ").and_then(|p| src[p..].find('<').map(|q| p + q + 1)) {
+
+    // Find the LAST `fn ` occurrence — the extracted function is appended at the end.
+    let fn_pos = match src.rfind("fn ") {
+        Some(p) => p,
+        None => return src,
+    };
+
+    // Try to inject into an existing generic list `fn foo<` starting from the last fn.
+    if let Some(offset) = src[fn_pos..].find('<') {
+        let pos = fn_pos + offset + 1;
         let (before, after) = src.split_at(pos);
         return format!("{before}{lt}, {after}");
     }
     // Otherwise inject a new generic parameter: `fn foo(` → `fn foo<'remN>(`
-    if let Some(pos) = src.find("fn ").and_then(|p| src[p..].find('(').map(|q| p + q)) {
+    if let Some(offset) = src[fn_pos..].find('(') {
+        let pos = fn_pos + offset;
         let (before, after) = src.split_at(pos);
         return format!("{before}<{lt}>{after}");
     }
@@ -172,6 +253,7 @@ mod tests {
                         error_code: "E0106".into(),
                         message: "missing lifetime".into(),
                         span_text: None,
+                        help_text: None,
                     }],
                 })
             } else {

@@ -124,6 +124,12 @@ impl ExtractFunctionUseCase {
             .collect();
         let rewritten_body = self.syntax_rewriter.rewrite_body_with_derefs(&body, &ref_var_names);
 
+        // ── 7c. Rewrite control-flow exits in the body ──────────────────────
+        let rewritten_body = match &cf_plan {
+            Some(cf) => rewrite_cf_body(&rewritten_body, &cf.enum_name, &analysis),
+            None => rewritten_body,
+        };
+
         // ── 8. Generate initial extraction text ───────────────────────────
         let generated = CodeGenerator::generate(
             &fn_name,
@@ -224,3 +230,135 @@ fn failure_response(reason: ExtractionFailure) -> ExtractFunctionResponse {
         verification: None,
     }
 }
+
+/// Strip `// ...` line comments from source text, preserving newlines.
+fn strip_line_comments(src: &str) -> String {
+    let mut result = String::with_capacity(src.len());
+    let mut in_string = false;
+    let mut string_delim = b'"';
+    let bytes = src.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if in_string {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                result.push(bytes[i] as char);
+                result.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if bytes[i] == string_delim {
+                in_string = false;
+            }
+            result.push(bytes[i] as char);
+            i += 1;
+        } else if bytes[i] == b'"' || bytes[i] == b'\'' {
+            in_string = true;
+            string_delim = bytes[i];
+            result.push(bytes[i] as char);
+            i += 1;
+        } else if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+            // Skip until end of line
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    result
+}
+
+/// Rewrite control-flow exits in the extracted body to return CF enum variants.
+///
+/// - `break`       → `return {enum_name}::Break`
+/// - `continue`    → `return {enum_name}::Continue`
+/// - `return expr` → `return {enum_name}::Return(expr)`
+///
+/// Then wraps the final value in `{enum_name}::Normal(...)`.
+fn rewrite_cf_body(
+    body: &str,
+    enum_name: &str,
+    analysis: &rem_domain::ports::analysis::SelectionAnalysis,
+) -> String {
+    use rem_domain::value_objects::ControlFlowKind;
+
+    let has_break = analysis.control_flow_exits.contains(&ControlFlowKind::Break);
+    let has_continue = analysis.control_flow_exits.contains(&ControlFlowKind::Continue);
+    let has_return = analysis.control_flow_exits.contains(&ControlFlowKind::Return);
+
+    // Strip line comments to avoid false matches on keywords inside comments
+    let cleaned = strip_line_comments(body);
+
+    let mut result = String::with_capacity(cleaned.len() + 512);
+    let bytes = cleaned.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() {
+        // Check for `return ` — handle first to avoid double-rewriting
+        if has_return && bytes[pos..].starts_with(b"return ") {
+            let after_ret = pos + 7;
+            // Find the semicolon/comma that ends this return statement
+            let mut depth = 0i32;
+            let mut end = after_ret;
+            while end < bytes.len() {
+                match bytes[end] {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => depth -= 1,
+                    b';' | b',' if depth == 0 => break,
+                    _ => {}
+                }
+                end += 1;
+            }
+            let expr = cleaned[after_ret..end].trim();
+            let terminator = &cleaned[end..end + 1]; // ; or ,
+            result.push_str(&format!("return {}::Return({}){}", enum_name, expr, terminator));
+            pos = end + 1;
+        }
+        // Check for `break` followed by ; or , or }
+        else if has_break && bytes[pos..].starts_with(b"break") {
+            let after_break = pos + 5;
+            // skip whitespace
+            let mut next = after_break;
+            while next < bytes.len() && bytes[next] == b' ' { next += 1; }
+            if next < bytes.len() && (bytes[next] == b';' || bytes[next] == b',' || bytes[next] == b'}') {
+                let terminator = &cleaned[next..next + 1];
+                result.push_str(&format!("return {}::Break{}", enum_name, terminator));
+                pos = next + 1;
+            } else {
+                result.push(bytes[pos] as char);
+                pos += 1;
+            }
+        }
+        // Check for `continue` followed by ; or , or }
+        else if has_continue && bytes[pos..].starts_with(b"continue") {
+            let after_cont = pos + 8;
+            let mut next = after_cont;
+            while next < bytes.len() && bytes[next] == b' ' { next += 1; }
+            if next < bytes.len() && (bytes[next] == b';' || bytes[next] == b',' || bytes[next] == b'}') {
+                let terminator = &cleaned[next..next + 1];
+                result.push_str(&format!("return {}::Continue{}", enum_name, terminator));
+                pos = next + 1;
+            } else {
+                result.push(bytes[pos] as char);
+                pos += 1;
+            }
+        }
+        else {
+            result.push(bytes[pos] as char);
+            pos += 1;
+        }
+    }
+
+    // Wrap the tail: append `Enum::Normal(())` or `Enum::Normal(<output>)` at the end
+    let tail = if analysis.output_variables.is_empty() {
+        format!("{}::Normal(())", enum_name)
+    } else {
+        let out_names: Vec<&str> = analysis.output_variables.iter().map(|v| v.name.as_str()).collect();
+        format!("{}::Normal({})", enum_name, out_names.join(", "))
+    };
+
+    format!("{}\n{}", result, tail)
+}
+

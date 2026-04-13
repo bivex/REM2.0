@@ -15,6 +15,8 @@ pub struct CompilerDiagnostic {
     pub error_code: String,
     pub message: String,
     pub span_text: Option<String>,
+    /// Help/note messages from child diagnostics (e.g. "consider adding `'a`")
+    pub help_text: Option<String>,
 }
 
 /// **Port**: lifetime & borrow repair — checks compiler acceptance and

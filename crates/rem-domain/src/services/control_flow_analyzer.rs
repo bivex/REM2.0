@@ -42,18 +42,26 @@ impl ControlFlowAnalyzer {
 
         let enum_name = format!("{}Cf{}", pascal(extracted_fn_name), serial);
         let mut variants = vec!["    Normal(T)".to_string()];
+        let mut has_return = false;
+        let mut has_try = false;
 
         for kind in exits {
             match kind {
-                ControlFlowKind::Return   => variants.push(format!("    {}(R)", CF_RETURN_VARIANT)),
+                ControlFlowKind::Return   => { variants.push(format!("    {}(R)", CF_RETURN_VARIANT)); has_return = true; }
                 ControlFlowKind::Break    => variants.push(format!("    {}", CF_BREAK_VARIANT)),
                 ControlFlowKind::Continue => variants.push(format!("    {}", CF_CONTINUE_VARIANT)),
-                ControlFlowKind::Try      => variants.push(format!("    {}(E)", CF_TRY_VARIANT)),
+                ControlFlowKind::Try      => { variants.push(format!("    {}(E)", CF_TRY_VARIANT)); has_try = true; }
             }
         }
 
+        // Build generic param list: only include params that are used
+        let mut generic_params = vec!["T".to_string()];
+        if has_return { generic_params.push("R".to_string()); }
+        if has_try { generic_params.push("E".to_string()); }
+        let generics = generic_params.join(", ");
+
         let enum_definition = format!(
-            "#[allow(dead_code)]\nenum {enum_name}<T, R, E> {{\n{}\n}}",
+            "#[allow(dead_code)]\nenum {enum_name}<{generics}> {{\n{}\n}}",
             variants.join(",\n")
         );
 
@@ -100,6 +108,7 @@ mod tests {
             is_async: false,
             is_const: false,
             referenced_generics: vec![],
+            enclosing_fn_return_type: None,
         }
     }
 

@@ -22,6 +22,10 @@ pub struct SelectionAnalysis {
     /// Generic parameters from the enclosing function that are referenced
     /// inside the selection (must be forwarded to the extracted fn).
     pub referenced_generics: Vec<GenericParam>,
+    /// Return type of the enclosing function (as a string). Used to
+    /// determine the `R` type parameter in the CF enum when `return`
+    /// expressions are reified.  `None` if the enclosing fn returns `()`.
+    pub enclosing_fn_return_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
