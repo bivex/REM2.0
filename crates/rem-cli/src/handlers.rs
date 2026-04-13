@@ -14,6 +14,7 @@ use rem_infrastructure::adapters::{
     event_publisher::TracingEventPublisher,
     filesystem::OsFileSystemAdapter,
     rust_analyzer::RustAnalyzerAdapter,
+    syntax_rewrite::SyntaxRewriteAdapter,
 };
 
 use crate::cli::{ExtractArgs, VerifyArgs};
@@ -22,10 +23,11 @@ use crate::cli::{ExtractArgs, VerifyArgs};
 
 pub fn handle_extract(args: ExtractArgs) -> Result<()> {
     let use_case = ExtractFunctionUseCase {
-        analysis:  Box::new(RustAnalyzerAdapter::new()),
-        repair:    Box::new(CargoCheckAdapter),
-        fs:        Box::new(OsFileSystemAdapter),
-        publisher: Box::new(TracingEventPublisher),
+        analysis:        Box::new(RustAnalyzerAdapter::new()),
+        repair:          Box::new(CargoCheckAdapter),
+        fs:              Box::new(OsFileSystemAdapter),
+        publisher:       Box::new(TracingEventPublisher),
+        syntax_rewriter: Box::new(SyntaxRewriteAdapter),
     };
 
     let request = ExtractFunctionRequest {

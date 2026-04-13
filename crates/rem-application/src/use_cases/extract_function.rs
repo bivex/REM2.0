@@ -9,6 +9,7 @@ use rem_domain::{
         event_publisher::ExtractionEventPublisher,
         filesystem::FileSystemPort,
         repair::LifetimeRepairPort,
+        syntax_rewrite::SyntaxRewritePort,
     },
     services::{
         code_generator::CodeGenerator,
@@ -16,7 +17,7 @@ use rem_domain::{
         lifetime_repairer::LifetimeRepairer,
         ownership_oracle::OwnershipOracle,
     },
-    value_objects::{ByteRange, FilePath, FunctionName},
+    value_objects::{ByteRange, FilePath, FunctionName, OwnershipKind},
 };
 
 use crate::{
@@ -32,10 +33,11 @@ use crate::{
 /// All I/O dependencies are injected.  The use-case itself contains no
 /// direct infrastructure calls.
 pub struct ExtractFunctionUseCase {
-    pub analysis:   Box<dyn CodeAnalysisPort>,
-    pub repair:     Box<dyn LifetimeRepairPort>,
-    pub fs:         Box<dyn FileSystemPort>,
-    pub publisher:  Box<dyn ExtractionEventPublisher>,
+    pub analysis:        Box<dyn CodeAnalysisPort>,
+    pub repair:          Box<dyn LifetimeRepairPort>,
+    pub fs:              Box<dyn FileSystemPort>,
+    pub publisher:       Box<dyn ExtractionEventPublisher>,
+    pub syntax_rewriter: Box<dyn SyntaxRewritePort>,
 }
 
 impl ExtractFunctionUseCase {
@@ -115,10 +117,17 @@ impl ExtractFunctionUseCase {
             .unwrap_or("")
             .to_string();
 
+        // ── 7b. Rewrite body with deref operators for ref-passed variables ──
+        let ref_var_names: Vec<String> = free_vars.iter()
+            .filter(|v| matches!(v.ownership, OwnershipKind::SharedRef | OwnershipKind::MutRef))
+            .map(|v| v.name.clone())
+            .collect();
+        let rewritten_body = self.syntax_rewriter.rewrite_body_with_derefs(&body, &ref_var_names);
+
         // ── 8. Generate initial extraction text ───────────────────────────
         let generated = CodeGenerator::generate(
             &fn_name,
-            &body,
+            &rewritten_body,
             &analysis,
             &free_vars,
             cf_plan.as_ref(),

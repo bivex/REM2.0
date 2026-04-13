@@ -1977,7 +1977,6 @@ dependencies = [
 name = "rem-domain"
 version = "0.1.0"
 dependencies = [
- "ra_ap_syntax",
  "serde",
  "thiserror",
  "tracing",

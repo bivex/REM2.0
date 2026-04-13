@@ -10,3 +10,4 @@ pub mod repair;
 pub mod verification;
 pub mod filesystem;
 pub mod event_publisher;
+pub mod syntax_rewrite;
