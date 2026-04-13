@@ -197,11 +197,43 @@ impl CodeAnalysisPort for RustAnalyzerAdapter {
         for node in syntax.descendants().filter(|n| text_range.contains_range(n.text_range())) {
             if let Some(_re) = ast::ReturnExpr::cast(node.clone()) {
                 control_flow_exits.push(rem_domain::value_objects::ControlFlowKind::Return);
-            } else if let Some(_be) = ast::BreakExpr::cast(node.clone()) {
-                // Heuristic: for now just ignore breaks inside the selection,
-                // as a truly robust check requires loop target resolution.
-            } else if let Some(_ce) = ast::ContinueExpr::cast(node.clone()) {
-                // Heuristic: same for continue.
+            } else if let Some(be) = ast::BreakExpr::cast(node.clone()) {
+                // Check if this break targets a loop WITHIN the selection.
+                // Heuristic: if there is an ancestor loop also within selection, 
+                // it might be the target.
+                let mut targets_outside = true;
+                for ancestor in be.syntax().ancestors() {
+                    if text_range.contains_range(ancestor.text_range()) {
+                        if ast::LoopExpr::cast(ancestor.clone()).is_some() ||
+                           ast::ForExpr::cast(ancestor.clone()).is_some() ||
+                           ast::WhileExpr::cast(ancestor).is_some() {
+                            targets_outside = false;
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                if targets_outside {
+                    control_flow_exits.push(rem_domain::value_objects::ControlFlowKind::Break);
+                }
+            } else if let Some(ce) = ast::ContinueExpr::cast(node.clone()) {
+                let mut targets_outside = true;
+                for ancestor in ce.syntax().ancestors() {
+                    if text_range.contains_range(ancestor.text_range()) {
+                        if ast::LoopExpr::cast(ancestor.clone()).is_some() ||
+                           ast::ForExpr::cast(ancestor.clone()).is_some() ||
+                           ast::WhileExpr::cast(ancestor).is_some() {
+                            targets_outside = false;
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                if targets_outside {
+                    control_flow_exits.push(rem_domain::value_objects::ControlFlowKind::Continue);
+                }
             }
         }
         control_flow_exits.dedup();

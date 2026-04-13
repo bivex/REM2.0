@@ -32,7 +32,8 @@ impl OwnershipOracle {
                 let ownership = match v.ownership {
                     // Adapter already determined it is mutated. Check if
                     // it also appears in the output set (live after extraction).
-                    OwnershipKind::MutRef | OwnershipKind::Owned => {
+                    OwnershipKind::MutRef => OwnershipKind::MutRef,
+                    OwnershipKind::Owned => {
                         let used_after = analysis
                             .output_variables
                             .iter()

@@ -36,6 +36,7 @@ impl LifetimeRepairer {
         let mut current = initial_patch;
 
         for iteration in 1..=MAX_REPAIR_ITERATIONS {
+            tracing::info!(iteration, current, "repair iteration");
             let outcome = port
                 .check(project_root, file, &current)
                 .map_err(|e| ExtractionFailure::AnalysisFailed(e.to_string()))?;
@@ -67,32 +68,49 @@ impl LifetimeRepairer {
 }
 
 fn apply_smarter_repair(src: &str, diagnostic: &crate::ports::repair::CompilerDiagnostic, n: u32) -> String {
-    let new_src = src.to_string();
-    
     match diagnostic.error_code.as_str() {
         "E0106" => {
-            // Missing lifetime. If the message mentions a parameter, try to use it.
-            // Simplified: just add a named lifetime to the signature.
-            apply_lifetime_heuristic(new_src, n)
+            // Missing lifetime.
+            // Try to extract the parameter name from the message if possible.
+            // Example: "missing lifetime specifier... help: this function's return type contains a borrowed value, 
+            // but the signature does not say whether it is borrowed from `accumulator` or `multiplier`"
+            let msg = &diagnostic.message;
+            let mut target_name = None;
+            
+            // Heuristic: find the first backticked word in the message that isn't 'static or a type.
+            for word in msg.split('`').step_by(2).skip(1) {
+                if !["static", "i32", "u32", "str", "String", "Self"].contains(&word) {
+                    target_name = Some(word);
+                    break;
+                }
+            }
+
+            if let Some(target) = target_name {
+                // Try to find the parameter in the source and add a lifetime to its type.
+                // e.g. "accumulator: &mut i32" -> "accumulator: &'remN mut i32"
+                let lt = format!("'rem{}", n);
+                let search_pattern = format!("{}: &", target);
+                if let Some(pos) = src.find(&search_pattern) {
+                    let insert_pos = pos + search_pattern.len();
+                    let (before, after) = src.split_at(insert_pos);
+                    // Special case for &mut
+                    if after.starts_with("mut ") {
+                        return format!("{}{} {}", before, lt, after);
+                    } else {
+                        return format!("{}{} {}", before, lt, after);
+                    }
+                }
+            }
+            
+            apply_lifetime_heuristic(src.to_string(), n)
         }
         "E0369" | "E0368" => {
             // Binary operation / Assignment on references. 
-            // Try to inject dereference operator '*' if the span mentions one of our variables.
+            // The Deref Rewriter in CodeGenerator usually handles this, 
+            // but if we are here, it means it missed something or a new error appeared.
             if let Some(span) = &diagnostic.span_text {
-                // This is a bit hacky but works for the demo: 
-                // find the first occurrence of the span in src and prepend '*' to variables.
-                // In a real tool, we would use RA to find the exact Expr and rewrite it.
                 if let Some(_pos) = src.find(span) {
                     let mut patched_span = span.clone();
-                    // If it's something like "accumulator += multiplier", 
-                    // we want "*accumulator += *multiplier" (if both are refs).
-                    // For now, let's just try to be slightly smarter.
-                    // We'll replace the first occurrence of the span with a deref'd version.
-                    // (Very aggressive heuristic for TDD).
-                    
-                    // Simple regex-like replacement for variables.
-                    // Since we don't have the variable list here easily, 
-                    // we'll just try to prepend '*' to words that are likely variables.
                     let words: Vec<&str> = span.split_whitespace().collect();
                     for word in words {
                         if word.chars().next().map(|c| c.is_alphabetic()).unwrap_or(false) {
@@ -104,9 +122,9 @@ fn apply_smarter_repair(src: &str, diagnostic: &crate::ports::repair::CompilerDi
                     return src.replacen(span, &patched_span, 1);
                 }
             }
-            apply_lifetime_heuristic(new_src, n)
+            apply_lifetime_heuristic(src.to_string(), n)
         }
-        _ => apply_lifetime_heuristic(new_src, n)
+        _ => apply_lifetime_heuristic(src.to_string(), n)
     }
 }
 

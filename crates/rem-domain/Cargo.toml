@@ -10,3 +10,5 @@ repository.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 serde     = { workspace = true }
+ra_ap_syntax = { workspace = true }
+tracing   = { workspace = true }
